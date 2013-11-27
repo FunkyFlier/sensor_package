@@ -10,7 +10,7 @@ ISR(TIMER5_COMPA_vect, ISR_NOBLOCK){
 }
 
 void ReadSerialStreams(){
-
+  getString();
 
   if (handShake == true){
     while(radio.available() > 0){

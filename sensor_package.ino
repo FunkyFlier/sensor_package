@@ -3,6 +3,13 @@
 #include <I2C.h>
 #include "openIMUL.h"
 #include <Streaming.h>
+#include <SD.h>
+#include <PString.h>//for pstrings
+
+#define chipSelect  53
+#define RS485RWPIN 7
+#define XMISSION_BUFFER_SIZE 1000 
+
 
 //LED defines
 #define RED 38
@@ -504,7 +511,46 @@ float airSpeedMperS,airSpeedMperSFiltered;
 
 
 //end air speed section
+//weather station code
+Sd2Card card;
+char weatherInBuf[90];
+char IMUInBuf[40];
+char weatherParseBuf[90];
+char IMUParseBuf[40];
+char *parseptr;
+char* filename="data-00.txt";
+int n=0;
 
+PString weatherInBuffer(weatherInBuf,90);
+PString IMUInBuffer(IMUInBuf,40);
+
+boolean weatherParseReady = false;
+boolean IMUParseReady = false;
+//---------------------------------------
+//parse vars
+//-----------------------------------------
+//gps vars:
+float timeHHMMSS;
+int8_t fixQuality;
+float longitude,lattitude,alt,trueHeading,magneticHeading,speedKnots,speedKMH;
+boolean gpsFix=false;
+//weather vars:
+float barometricPressureInches,barometricPressureBars,airTemp,_relativeHumidity,dewPoint;
+float windDirectionTrue,windDirectionMagnetic,windSpeedKnots,windSpeedMetersPerSecond;
+float weatherPitch,weatherRoll,weatherYaw,relativeWindChill,theoreticalWindChill;
+//AHRS vars:
+float yaw,pitch,roll;
+//-------------------------------------------------
+//transmission vars//
+//-------------------------------------------------
+char transmissionBuffer[XMISSION_BUFFER_SIZE];//large because all the data is a significant size
+PString transmissionString(transmissionBuffer,XMISSION_BUFFER_SIZE);
+long transmissionTimer=0;
+long LCDTimer = 0;
+
+boolean SDCardPresent = false;
+
+//end weather station code
 
 
 //constructors //fix the dts
@@ -535,6 +581,7 @@ void setup(){
   D29Output();
 
   Serial.begin(115200);
+  WeatherStationStartCode();
   //DetectRC();
   _200HzISRConfig();
   //CalibrateESC();//throttle high will trigger this reset after calibration
@@ -625,8 +672,26 @@ void loop(){
     d.v.baroAltitude = imu.ZEst;
   }
 
+  if(weatherParseReady==true)
+  {
+    parseptr = weatherParseBuf;
+    parseString();
+    weatherParseReady = false;
+  }
 
-  if (millis() - generalPurposeTimer > 50){
+  if(IMUParseReady==true)
+  {
+    parseptr = IMUParseBuf;
+    parseString();
+    IMUParseReady = false;
+  }
+
+  if(millis()- transmissionTimer >=200)
+  {
+    transmission();
+    transmissionTimer = millis();
+  }  
+  /*if (millis() - generalPurposeTimer >= 50){
     generalPurposeTimer = millis();
     //Serial<<rcCommands.values.aileron<<","<<rcCommands.values.elevator<<","<<rcCommands.values.throttle<<","<<rcCommands.values.rudder<<"\r\n";
     //Serial<<rollSetPoint<<","<<pitchSetPoint<<"\r\n";
@@ -637,18 +702,81 @@ void loop(){
     //Serial<<generalPurposeTimer<<","<<YTarget<<","<<imu.YEst<<","<<velSetPointY<<","<<imu.velY<<","<<setPointY<<<","<<rollSetPoint<<"\r\n";
     //Serial<<generalPurposeTimer<<",",<<targetAltitude<<","<<actualAltitude<<","<<targetVelAlt<<","<<imu.velZ<<","<<throttleAdjustment<<"\r\n";
     //Serial<<d.v.kp_waypoint_velocity<<","<<d.v.fc_waypoint_velocity<<"\r\n";
-    Serial<<imu.pitch<<","<<imu.roll<<","<<imu.yaw<<","<<relativeHumidity<<","<<airSpeedMperS<<"\r\n";
+    //Serial<<millis()<<","<<gpsFix<<","<<imu.pitch<<","<<imu.roll<<","<<imu.yaw<<","<<relativeHumidity<<","<<airSpeedMperS<<"\r\n";
     //Serial<<imu.pitch<<","<<imu.roll<<","<<imu.yaw<<","<<imu.velX<<","<<imu.XEst<<","<<imu.velY<<","<<imu.YEst<<","<<imu.velZ<<","<<imu.ZEst<<"\r\n";
     //Serial<<imu.inertialX<<","<<imu.inertialY<<","<<imu.inertialZ<<"\r\n";
     //Serial<<imu.inertialZ<<","<<imu.velZ<<","<<imu.ZEst<<"\r\n";
     //Serial<<imu.inertialX<<","<<imu.velX<<","<<imu.XEst<<","<<imu.inertialY<<","<<imu.velY<<","<<imu.YEst<<","<<imu.inertialZ<<","<<imu.velZ<<","<<imu.ZEst<<"\r\n";
     //Serial<<acc.v.x<<","<<acc.v.y<<","<<acc.v.z<<","<<scaledAccX<<","<<scaledAccY<<","<<scaledAccZ<<"\r\n";
-  }
+  }*/
 
 
   watchDogFailSafeCounter = 0;
 }
 
+void WeatherStationStartCode(){
+  Serial.println("Congifuration Start");   
+
+  pinMode(RS485RWPIN,OUTPUT);
+  digitalWrite(RS485RWPIN,HIGH);
+  Serial1.begin(4800);
+  Serial.println("waiting for weather station boot");
+  for (int j=15;j>0;j--)
+  {
+    Serial.println(j);
+    delay(1000);
+  }
+  Serial.println("transmitting strings");
+  Serial1.println("$PAMTC,HEATER,A*05");//enable heater
+  delay(100);
+  Serial1.println("$PAMTC,BAUD,38400*66");//set baud rate to 38400
+  delay(100);
+  Serial1.end();
+  Serial1.begin(38400);
+  delay(100);
+  Serial1.println("$PAMTX,0");
+  delay(100);
+  Serial1.println("$PAMTC,EN,ALL,0");
+  delay(100);
+  Serial1.println("$PAMTC,EN,GGA,5");
+  delay(100);
+  Serial1.println("$PAMTC,EN,MDA,5");
+  delay(100);
+  Serial1.println("$PAMTC,EN,XDRB,5");
+  delay(100);
+  Serial1.println("$PAMTC,EN,HDG,5");
+  delay(100);
+  Serial1.println("$PAMTX,1");
+  delay(100);
+  digitalWrite(RS485RWPIN,LOW);//Set mode to read now that config is done 
+  Serial.println("Weather station config complete");   
+
+  // if (!card.init(SPI_QUARTER_SPEED, chipSelect))
+  //if (!SD.begin(chipSelect, SPI_QUARTER_SPEED)) 
+  if (!SD.begin(chipSelect)) 
+  {
+    Serial.println("Card failed, or not present");
+    // don't do anything more:
+
+  }
+  else
+  {
+    Serial.println("card initialized.");
+    SDCardPresent = true;
+  }
+  //initialize 5 hz transmission timer
+  delay(1000);
+  transmissionTimer = millis();  
+  sprintf(filename,"data-%d.txt",n);
+  while(SD.exists(filename))
+  {
+    n++;
+    sprintf(filename,"data-%d.txt",n);
+  }
+
+  Serial.println(filename);
+
+}
 
 
 
