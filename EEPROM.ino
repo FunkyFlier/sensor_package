@@ -1,6 +1,6 @@
 #include "AUXMATH.h"
 
-void DEBUG_DUMP(){
+/*void DEBUG_DUMP(){
   Serial<< _FLOAT(ACC_OFFSET_X,7) <<"\r\n";
   Serial<< _FLOAT(ACC_OFFSET_Y,7) <<"\r\n";
   Serial<< _FLOAT(ACC_OFFSET_Z,7) <<"\r\n";
@@ -88,7 +88,7 @@ void DEBUG_DUMP(){
   Serial<< _FLOAT(d.v.fc_cross_track,7) <<"\r\n";
   Serial<< _FLOAT(d.v.declination,7) <<"\r\n";
 
-}
+}*/
 
 void LEDIndicators(){
   calibrationFlags = EEPROM.read(0x00);

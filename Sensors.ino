@@ -113,30 +113,6 @@ void SendCalData(){
 }
 
 
-void GPSStart(){
-  gps.init();
-  generalPurposeTimer = millis();
-  while ((millis() - generalPurposeTimer < 1000) && (gps.newData == false)){
-    gps.Monitor();
-    if (gps.newData == true){
-      GPSDetected = true;
-    }
-  }
-  //to do add feed back with leds
-  if (GPSDetected == true){
-    while (gps.data.vars.gpsFix != 3){
-    }
-    homeBase.coord.lat = gps.data.vars.lat;
-    homeBase.coord.lon = gps.data.vars.lon;
-    homeBase.coord.alt = gps.data.vars.hMSL; //+ (5000);//home altitude is ground altitude plus 5 meters
-    gps.newData = false;
-    while (gps.newData == false){
-    }
-  }  
-
-
-
-}
 
 void GetAltitude(long *press,long *pressInit, float *alti){
   pressureRatio = (float) *press / (float) *pressInit;
